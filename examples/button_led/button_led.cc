@@ -44,6 +44,7 @@ namespace {
   while (true) {
     vTaskSuspend(nullptr);
     on = !on;
+    printf("Button pressed");
     LedSet(Led::kUser, on);
   }
 }

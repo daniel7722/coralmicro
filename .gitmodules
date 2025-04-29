@@ -49,3 +49,6 @@
 [submodule "third_party/littlefs-fuse"]
 	path = third_party/littlefs-fuse
 	url = https://github.com/google-coral/coralmicro-littlefs-fuse
+[submodule "Fine-tuning"]
+	path = Fine-tuning
+	url = https://github.com/daniel7722/Fine-tuning.git
