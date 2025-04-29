@@ -15,5 +15,6 @@
 add_subdirectory(elf_loader)
 add_subdirectory(mfg_test)
 add_subdirectory(multicore_model_cascade)
+add_subdirectory(catdog_blinker)
 add_subdirectory(rack_test)
 add_subdirectory(usb_drive)
