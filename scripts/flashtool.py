@@ -1015,9 +1015,8 @@ def main():
     print('%s does not exist' % elftosb_path)
     return
 
-  # blhost_path = os.path.join(root_dir, 'third_party', 'nxp',
-  #                            'blhost', 'bin', platform_dir, 'blhost' + exe_extension)
-  blhost_path = '/mnt/blhost/blhost'
+  blhost_path = os.path.join(root_dir, 'third_party', 'nxp',
+                             'blhost', 'bin', platform_dir, 'blhost' + exe_extension)
   elfloader_path = args.elfloader_path if args.elfloader_path else FindElfloader(
       build_dir, cached_files)
   elfloader_elf_path = os.path.join(
