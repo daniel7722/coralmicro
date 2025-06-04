@@ -65,6 +65,7 @@ It turns out streaming and logging at the same time is really annoying because b
 
 
 The threads operates as the follow: 
+```
 Main Function Thread
 ├── Main Task Thread
 │   ├── Waits for `isSetup` flag from NetworkTask
@@ -76,3 +77,4 @@ Main Function Thread
     ├── Waits for incoming client connection
     ├── Sets `isSetup = true` upon successful connection
     └── Provides `Send()` method used by both tasks
+```
