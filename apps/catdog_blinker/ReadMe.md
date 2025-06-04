@@ -65,20 +65,14 @@ It turns out streaming and logging at the same time is really annoying because b
 
 
 The threads operates as the follow: 
----------------------------------------------------------------------
-|                                                                   |
-|                    **Main Function Thread**                       |
-|                                                                   |
----------------------------------------------------------------------
-              |                                     |
-              |                                     |
--------------------------------     ---------------------------------
-|    **Main Task Thread**     |     |    **Network Task Thread**    |
-|                             |     |                               |
-|  - Waiting for network task |     |  - Open socket server and     |
-|  to switch flag (isSetup)   |     |  wait for a client connection |
-|  - Enable Camera, capture   |---->|  - Send() sends data to       |
-|  frames and send through    |     |  client. Used by both Tasks   |
-|  network task.              |     |                               |
-|                             |     ---------------------------------
--------------------------------
+Main Function Thread
+├── Main Task Thread
+│   ├── Waits for `isSetup` flag from NetworkTask
+│   ├── Powers on and enables the camera
+│   ├── Captures frames continuously
+│   └── Sends compressed JPEGs via NetworkTask
+└── Network Task Thread
+    ├── Opens socket server on port 27000
+    ├── Waits for incoming client connection
+    ├── Sets `isSetup = true` upon successful connection
+    └── Provides `Send()` method used by both tasks
