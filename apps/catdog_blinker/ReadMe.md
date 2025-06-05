@@ -84,3 +84,8 @@ The threads operates as the follow:
 |                             |     ---------------------------------
 -------------------------------
 ```
+
+## Tiny Machine Learning Model
+### [2025-06-05]
+
+Previously, I have tested mobilenetv3 fine-tuned on cats and dogs images. However, when I try to deploy on the board, it failed. Multiple reasons might have cause this. First, it could be the size of the model being too large, silently crashes the whole board. Second, the operations are not well-defined so TPU aren't really capable of interpret the model. Or, it could be that I forgot to include DATA in CMakeLists.txt. But I've got it working finally, but the command `screen` is really slow and will lose many valuable outputs. I guess it has to stay this way for a bit. 

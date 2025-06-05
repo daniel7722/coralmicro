@@ -66,11 +66,11 @@ void WriteMessageImageInfo(int fd) {
     kIsSetup = true;
 }
 
-// struct TaskMessage {
-//     int command;
-//     SemaphoreHandle_t completion_semaphore;
-//     void* data;
-// };
+struct TaskMessage {
+    int command;
+    SemaphoreHandle_t completion_semaphore;
+    void* data;
+};
 
 /**
  * @brief Base class for wrapping FreeRTOS tasks using CRTP.<unnamed>
@@ -156,10 +156,9 @@ class NetworkTask : private Task<NetworkTask> {
 
     // just a test function
     [[nodiscard]] bool lottery() const {
-        MutexLock lock(mutex_);
         int num = rand() % 101;
         printf("Number is: %d\r\n", num); 
-        return num > 80;
+        return num > 90;
     }
 
     // Run() is the main loop for this task.
@@ -196,109 +195,6 @@ class NetworkTask : private Task<NetworkTask> {
     }
 };
 
-// class MainTask : private Task<MainTask> {
-//   public:
-//     MainTask(NetworkTask* network_task)
-//         : Task("catdog_camera_task", kAppTaskPriority),
-//         network_task_(network_task),
-//         queue_(xQueueCreate(2, sizeof(TaskMessage))) {
-//         printf("MainTask constructor done!\r\n");
-//         CHECK(queue_);
-//     };
-   
-//     void Start() { SendCommandBlocking(kCmdStart); }
-
-//     void Stop() { SendCommandBlocking(kCmdStop); }
-
-//     void Run() const {
-//         printf("MainTask::Run() entered\r\n");
-//         bool started = false;
-
-//         std::vector<uint8_t> input(kModelSize);
-//         std::vector<unsigned char> jpeg(1024 * 70);
-
-//         TaskMessage message{};
-
-//         while (true) {
-//             CHECK(xQueueReceive(queue_, &message, portMAX_DELAY) == pdTRUE);
-//             printf("MainTask received command: %d\r\n", message.command);
-
-//             switch (message.command) {
-//             case kCmdStart:
-//                 configASSERT(!started);
-//                 started = true;
-//                 CameraTask::GetSingleton()->Enable(CameraMode::kStreaming);
-//                 printf("M7 Main Task: started\r\n");
-//                 QueueProcess();
-//                 break;
-//             case kCmdStop:
-//                 configASSERT(started);
-//                 CameraTask::GetSingleton()->Disable();
-//                 started = false;
-//                 printf("M7 Main Task: stopped\r\n");
-//                 break;
-//             case kCmdProcess: {
-//                 if (!started) {
-//                     printf("kCmdProcess skipped: not started\r\n");
-//                     continue; 
-//                 }
-//                 printf("Grabbing camera frame\r\n");
-
-//                 coralmicro::CameraFrameFormat fmt;
-//                 fmt.width = kModelWidth;
-//                 fmt.height = kModelHeight;
-//                 fmt.fmt = CameraFormat::kRgb;
-//                 fmt.filter = CameraFilterMethod::kBilinear;
-//                 fmt.preserve_ratio = false;
-//                 fmt.buffer = input.data();
-//                 CameraTask::GetSingleton()->GetFrame({fmt});
-//                 printf("Got frame, compressing to JPEG\r\n");
-
-//                 auto jpeg_size =
-//                     JpegCompressRgb(input.data(), fmt.width, fmt.height,
-//                                     /*quality=*/75, jpeg.data(), jpeg.size());
-//                 printf("JPEG size:%d\r\n", jpeg_size); 
-//                 network_task_->Send(kMessageTypeImageData, jpeg.data(), jpeg_size);
-//                 printf("Image sent to client\r\n");
-
-//                 // Process next camera frame.
-//                 QueueProcess();
-//             } break;
-
-//             default:
-//                 printf("Unknown command: %d\r\n", message.command);
-//                 break;
-//             }
-
-//             // Signal the command completion semaphore, if present.
-//             if (message.completion_semaphore) {
-//                 CHECK(xSemaphoreGive(message.completion_semaphore) == pdTRUE);
-//             }
-//         }
-
-//         printf("Warning: Run() exited unexpectedly\r\n");
-//     }
-   
-//   private:
-//     void SendCommandBlocking(int command) {
-//         TaskMessage message = {command, xSemaphoreCreateBinary()};
-//         CHECK(message.completion_semaphore);
-//         CHECK(xQueueSend(queue_, &message, portMAX_DELAY) == pdTRUE);
-//         CHECK(xSemaphoreTake(message.completion_semaphore, portMAX_DELAY) ==
-//                 pdTRUE);
-//         vSemaphoreDelete(message.completion_semaphore);
-//     }
-
-//     void QueueProcess() const {
-//         TaskMessage message = {kCmdProcess};
-//         CHECK(xQueueSend(queue_, &message, portMAX_DELAY) == pdTRUE);
-//     }
-
-//     NetworkTask* network_task_ = nullptr;
-//     QueueHandle_t queue_;
-// };
-
-
 /**
  * MainTask is responsible for managing the camera and sending image data.
  * 
@@ -309,60 +205,104 @@ class MainTask : private Task<MainTask> {
   public:
     MainTask(NetworkTask* network_task)
         : Task("catdog_camera_task", kAppTaskPriority),
-        network_task_(network_task){
+        network_task_(network_task),
+        queue_(xQueueCreate(2, sizeof(TaskMessage))) {
         printf("MainTask constructor done!\r\n");
+        CHECK(queue_);
     };
-    
-    // Main loop: waits for the system to finish setup, enables camera, then streams frames.
+   
+    void Start() { SendCommandBlocking(kCmdStart); }
+
+    void Stop() { SendCommandBlocking(kCmdStop); }
+
     void Run() const {
-        // Allocate space for input RGB frame and compressed JPEG buffer.
+        printf("MainTask::Run() entered\r\n");
+        bool started = false;
+
         std::vector<uint8_t> input(kModelSize);
         std::vector<unsigned char> jpeg(1024 * 70);
 
-        // Busy-wait until the global flag is set (After client connection by network_task).
-        // TODO: Maybe use queue-based notification like in multicore_model_cascade?
-        while (!kIsSetup) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
+        TaskMessage message{};
 
-        // Power on the camera and enable streaming mode.
-        printf("Enabling Camera...");
-        CameraTask::GetSingleton()->SetPower(true);
-        CameraTask::GetSingleton()->Enable(CameraMode::kStreaming); 
-
-        // Infinite capture and send loop.        
         while (true) {
-            // Set up desired format and resolution for the camera frame.
-            coralmicro::CameraFrameFormat fmt;
-            fmt.width = kModelWidth;
-            fmt.height = kModelHeight;
-            fmt.fmt = CameraFormat::kRgb;                 // 3-channel RGB format
-            fmt.filter = CameraFilterMethod::kBilinear;   // Bilinear filtering for resizing
-            fmt.preserve_ratio = false;                   // Stretch to fit the resolution
-            fmt.buffer = input.data();                    // Write to bufferd
+            CHECK(xQueueReceive(queue_, &message, portMAX_DELAY) == pdTRUE);
 
-            // Grab frame from camera (blocking call).
-            printf("Camera Getting Frame");
-            CameraTask::GetSingleton()->GetFrame({fmt});
+            switch (message.command) {
+            case kCmdStart:
+                configASSERT(!started);
+                started = true;
+                CameraTask::GetSingleton()->SetPower(true);
+                CameraTask::GetSingleton()->Enable(CameraMode::kStreaming);
+                printf("M7 Main Task: started\r\n");
+                QueueProcess();
+                break;
+            case kCmdStop:
+                configASSERT(started);
+                CameraTask::GetSingleton()->Disable();
+                started = false;
+                printf("M7 Main Task: stopped\r\n");
+                break;
+            case kCmdProcess: {
+                if (!started) {
+                    printf("kCmdProcess skipped: not started\r\n");
+                    continue; 
+                }
 
-            // Compress the RGB frame to JPEG format.
-            auto jpeg_size =
-              JpegCompressRgb(input.data(), fmt.width, fmt.height,
-                              /*quality=*/75, jpeg.data(), jpeg.size());
-            // Send compressed JPEG to the client via NetworkTask.
-            network_task_->Send(kMessageTypeImageData, jpeg.data(), jpeg_size);
+                coralmicro::CameraFrameFormat fmt;
+                fmt.width = kModelWidth;
+                fmt.height = kModelHeight;
+                fmt.fmt = CameraFormat::kRgb;
+                fmt.filter = CameraFilterMethod::kBilinear;
+                fmt.preserve_ratio = false;
+                fmt.buffer = input.data();
+                CameraTask::GetSingleton()->GetFrame({fmt});
 
-            // Delay to regulate frame rate
-            vTaskDelay(pdMS_TO_TICKS(100)); 
+                auto jpeg_size =
+                    JpegCompressRgb(input.data(), fmt.width, fmt.height,
+                                    /*quality=*/75, jpeg.data(), jpeg.size());
+                // printf("JPEG size:%d\r\n", jpeg_size); 
+                network_task_->Send(kMessageTypeImageData, jpeg.data(), jpeg_size);
+
+                // Process next camera frame.
+                QueueProcess();
+            } break;
+
+            default:
+                printf("Unknown command: %d\r\n", message.command);
+                break;
+            }
+
+            // Signal the command completion semaphore, if present.
+            if (message.completion_semaphore) {
+                CHECK(xSemaphoreGive(message.completion_semaphore) == pdTRUE);
+            }
         }
+
+        printf("Warning: Run() exited unexpectedly\r\n");
     }
-  
-  private: 
+   
+  private:
+    void SendCommandBlocking(int command) {
+        TaskMessage message = {command, xSemaphoreCreateBinary()};
+        CHECK(message.completion_semaphore);
+        CHECK(xQueueSend(queue_, &message, portMAX_DELAY) == pdTRUE);
+        CHECK(xSemaphoreTake(message.completion_semaphore, portMAX_DELAY) ==
+                pdTRUE);
+        vSemaphoreDelete(message.completion_semaphore);
+    }
+
+    void QueueProcess() const {
+        TaskMessage message = {kCmdProcess};
+        CHECK(xQueueSend(queue_, &message, portMAX_DELAY) == pdTRUE);
+    }
+
     NetworkTask* network_task_ = nullptr;
+    QueueHandle_t queue_;
 };
 
 [[noreturn]] void Main() {
-    printf("Multicore Model Cascade!\r\n");
+    printf("Let's Cat and dog!\r\n");
+    fflush(stdout); 
 
     // ------------------------------------------------------------------------
     // 1. Start Watchdog
@@ -393,30 +333,31 @@ class MainTask : private Task<MainTask> {
     // Immediate feedback that the app is running.
     LedSet(Led::kStatus, true); 
 
-    // std::vector<uint8_t> catdog_tflite;
-    // if (!LfsReadFile(kModelPath, &catdog_tflite)) {
-    //     printf("ERROR: Failed to read model: %s\r\n", kModelPath);
-    //     vTaskSuspend(nullptr);
-    // }
+    std::vector<uint8_t> catdog_tflite;
+    if (!LfsReadFile(kModelPath, &catdog_tflite)) {
+        printf("ERROR: Failed to read model: %s\r\n", kModelPath);
+        vTaskSuspend(nullptr);
+    }
 
     // Starts the mobilenetv3 engine.
-    // tflite::MicroErrorReporter error_reporter;
-    // tflite::MicroMutableOpResolver<9> resolver;
-    // resolver.AddCustom(kCustomOp, RegisterCustomOp());
-    // resolver.AddFullyConnected(); 
-    // resolver.AddDepthwiseConv2D(); 
-    // resolver.AddHardSwish(); 
-    // resolver.AddAdd(); 
-    // resolver.AddMean(); 
-    // resolver.AddLogistic(); 
-    // resolver.AddMul(); 
-    // auto interpreter = std::make_shared<tflite::MicroInterpreter>(
-    //     tflite::GetModel(catdog_tflite.data()), resolver, tensor_arena,
-    //     kTensorArenaSize, &error_reporter);
-    // if (interpreter->AllocateTensors() != kTfLiteOk) {
-    //     printf("Failed to allocate tensor\r\n");
-    //     vTaskSuspend(nullptr);
-    // }
+    tflite::MicroErrorReporter error_reporter;
+    tflite::MicroMutableOpResolver<9> resolver;
+    resolver.AddFullyConnected(); 
+    resolver.AddDepthwiseConv2D(); 
+    resolver.AddHardSwish(); 
+    resolver.AddAdd(); 
+    resolver.AddMean(); 
+    resolver.AddLogistic(); 
+    resolver.AddMul(); 
+    resolver.AddConv2D();
+    resolver.AddAveragePool2D();
+    auto interpreter = std::make_shared<tflite::MicroInterpreter>(
+        tflite::GetModel(catdog_tflite.data()), resolver, tensor_arena,
+        kTensorArenaSize, &error_reporter);
+    if (interpreter->AllocateTensors() != kTfLiteOk) {
+        printf("Failed to allocate tensor\r\n");
+        vTaskSuspend(nullptr);
+    }
 
     // ------------------------------------------------------------------------
     // 4. Create FreeRTOS tasks
@@ -426,38 +367,34 @@ class MainTask : private Task<MainTask> {
     NetworkTask network_task;
     MainTask main_task(&network_task);
     printf("Main created tasks, now starting main loop\r\n");
-    vTaskSuspend(nullptr); 
 
 
+    while (true) {
 
-    // while (true) {
+        // Start camera_task processing.
+        main_task.Start();
+        printf("Main loop: main_task.Start() done\r\n");
 
-    //     // Start camera_task processing.
-    //     main_task.Start();
-    //     printf("Main loop: main_task.Start() done\r\n");
+        for (int i = 0; i < 5; i++) {
+            LedSet(Led::kUser, true); 
+            vTaskDelay(pdMS_TO_TICKS(100)); 
+            LedSet(Led::kUser, false); 
+            vTaskDelay(pdMS_TO_TICKS(100)); 
+        }
 
-    //     for (int i = 0; i < 5; i++) {
-    //         LedSet(Led::kUser, true); 
-    //         vTaskDelay(pdMS_TO_TICKS(100)); 
-    //         LedSet(Led::kUser, false); 
-    //         vTaskDelay(pdMS_TO_TICKS(100)); 
-    //     }
+        while (true) {
+            printf("System Running...\r\n");
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
 
-    //     while (true) {
-    //         // if (!network_task.lottery()) {
-    //         //     printf("Number too low!!\r\n");
-    //         //     break;
-    //         // }
-    //         vTaskDelay(pdMS_TO_TICKS(1000));
-    //     }
-
-    //     // Stop camera_task processing. This will also stop posenet_task.
-    //     main_task.Stop();
-    //     printf("main loop: main_task.Stop() done\r\n"); 
-    // }
+        // Stop camera_task processing.
+        main_task.Stop();
+        printf("main loop: main_task.Stop() done\r\n"); 
+    }
 }
 }
 }
+
 
 extern "C" void app_main(void* param) {
     (void)param;
