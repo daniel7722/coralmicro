@@ -39,7 +39,7 @@ Now you can flash through:
 python3 scripts/flashtool.py -a <app name> (or -e <example name>)
 ```
 
-Then, you should see the terminal saying it's restarting the device. After seeing this message, open another terminal to access serial console
+Then, you should see the terminal saying it's restarting the deviceee. After sing this message, open another terminal to access serial console.
 
 ```
 ls /dev/ttyACM*
@@ -51,6 +51,12 @@ Depends on the output of ls, normally it would appear `ttyACM0`. If it shows `[s
 python3 apps/catdog_blinker/stream.py
 ```
 Now you should be able to see the streaming camera and Voila. 
+
+By the way, if changes are made and a rebuild is neccessary: 
+```
+make -C build/apps/catdog_blinker/
+```
+This should rebuild only this part of the repo. 
 
 
 
@@ -89,3 +95,5 @@ The threads operates as the follow:
 ### [2025-06-05]
 
 Previously, I have tested mobilenetv3 fine-tuned on cats and dogs images. However, when I try to deploy on the board, it failed. Multiple reasons might have cause this. First, it could be the size of the model being too large, silently crashes the whole board. Second, the operations are not well-defined so TPU aren't really capable of interpret the model. Or, it could be that I forgot to include DATA in CMakeLists.txt. But I've got it working finally, but the command `screen` is really slow and will lose many valuable outputs. I guess it has to stay this way for a bit. 
+
+Now I'm about to try run inference on my model.

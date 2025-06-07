@@ -195,6 +195,61 @@ class NetworkTask : private Task<NetworkTask> {
     }
 };
 
+class InferenceTask : private Task<InferenceTask> {
+  public:
+    explicit InferenceTask(NetworkTask* network_task_,
+                           std::shared_ptr<tflite::MicroInterpreter>& interpreter)
+      : Task("catdog_mobilenet_task", kAppTaskPriority),
+        network_task_(network_task_),
+        queue_(xQueueCreate(1, sizeof(char))),
+        interpreter_(std::move(interpreter)),
+        counter_(0) {
+        CHECK(queue_);
+        printf("InferenceTask created\r\n");
+  }
+
+    void Put(const std::vector<uint8_t>& frame) {
+        if (uxQueueMessagesWaiting(queue_) == 0) {
+            CHECK(frame.size() == kModelSize);
+            std::memcpy(tflite::GetTensorData<uint8_t>(interpreter_->input(0)),
+                        frame.data(), kModelSize);
+            char cmd = 0;
+            CHECK(xQueueSend(queue_, &cmd, portMAX_DELAY) == pdTRUE);
+            printf("Put() ->enqueueed inference request\r\n");
+        }
+    }
+
+    [[noreturn]] void Run() {
+        while (true) {
+            printf("InferenceTask::Run() entered\r\n");
+            char cmd;
+            CHECK(xQueuePeek(queue_, &cmd, portMAX_DELAY) == pdTRUE);
+            counter_++;
+            CHECK(interpreter_->Invoke() == kTfLiteOk);
+            TfLiteTensor* output = interpreter_->output(0);
+            uint8_t* scores = output->data.uint8;
+            float scale = output->params.scale;
+            int zero_point = output->params.zero_point;
+            float cat_score = (scores[0] - zero_point) * scale;
+            float dog_score = (scores[1] - zero_point) * scale;
+
+            //   int predicted_class = (cat_score > dog_score) ? 0 : 1;
+            //   const char* predicted_label = (predicted_class == 0) ? "cat" : "dog";
+
+            if (counter_ % kLogInterval == 0 || true) {
+                printf("cat_score: %.2f, dog_score: %.2f\r\n", cat_score, dog_score);
+            }
+            CHECK(xQueueReceive(queue_, &cmd, portMAX_DELAY) == pdTRUE);
+        }
+    }
+
+  private:
+    NetworkTask* network_task_;
+    QueueHandle_t queue_;
+    std::shared_ptr<tflite::MicroInterpreter> interpreter_;
+    size_t counter_;
+};
+
 /**
  * MainTask is responsible for managing the camera and sending image data.
  * 
@@ -203,9 +258,10 @@ class NetworkTask : private Task<NetworkTask> {
  */
 class MainTask : private Task<MainTask> {
   public:
-    MainTask(NetworkTask* network_task)
+    MainTask(NetworkTask* network_task, InferenceTask* inference_task)
         : Task("catdog_camera_task", kAppTaskPriority),
         network_task_(network_task),
+        inference_task_(inference_task),
         queue_(xQueueCreate(2, sizeof(TaskMessage))) {
         printf("MainTask constructor done!\r\n");
         CHECK(queue_);
@@ -260,8 +316,9 @@ class MainTask : private Task<MainTask> {
                 auto jpeg_size =
                     JpegCompressRgb(input.data(), fmt.width, fmt.height,
                                     /*quality=*/75, jpeg.data(), jpeg.size());
-                // printf("JPEG size:%d\r\n", jpeg_size); 
                 network_task_->Send(kMessageTypeImageData, jpeg.data(), jpeg_size);
+
+                inference_task_->Put(input);
 
                 // Process next camera frame.
                 QueueProcess();
@@ -297,6 +354,7 @@ class MainTask : private Task<MainTask> {
     }
 
     NetworkTask* network_task_ = nullptr;
+    InferenceTask* inference_task_ = nullptr;
     QueueHandle_t queue_;
 };
 
@@ -365,8 +423,9 @@ class MainTask : private Task<MainTask> {
     // NetworkTask handles TCP server + message transmission.
     // MainTask handles camera streaming and image processing.
     NetworkTask network_task;
-    MainTask main_task(&network_task);
-    printf("Main created tasks, now starting main loop\r\n");
+    InferenceTask inference_task(&network_task, interpreter);
+    MainTask main_task(&network_task, &inference_task);
+    printf("Tasks created, now starting main loop\r\n");
 
 
     while (true) {
@@ -383,8 +442,8 @@ class MainTask : private Task<MainTask> {
         }
 
         while (true) {
-            printf("System Running...\r\n");
-            vTaskDelay(pdMS_TO_TICKS(100));
+            // printf("System Running...\r\n");
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
 
         // Stop camera_task processing.
