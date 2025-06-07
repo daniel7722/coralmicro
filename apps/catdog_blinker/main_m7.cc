@@ -1,4 +1,5 @@
 #include "libs/base/filesystem.h"
+#include "libs/base/gpio.h"
 #include "libs/base/led.h"
 #include "libs/base/mutex.h"
 #include "libs/base/network.h"
@@ -362,6 +363,13 @@ class MainTask : private Task<MainTask> {
     printf("Let's Cat and dog!\r\n");
     fflush(stdout); 
 
+    GpioConfigureInterrupt(
+        Gpio::kUserButton, GpioInterruptMode::kIntModeFalling,
+        [handle = xTaskGetCurrentTaskHandle()]() { xTaskResumeFromISR(handle); },
+        /*debounce_interval_us=*/50 * 1e3);
+
+    vTaskSuspend(nullptr);
+
     // ------------------------------------------------------------------------
     // 1. Start Watchdog
     // ------------------------------------------------------------------------
@@ -400,6 +408,7 @@ class MainTask : private Task<MainTask> {
     // Starts the mobilenetv3 engine.
     tflite::MicroErrorReporter error_reporter;
     tflite::MicroMutableOpResolver<9> resolver;
+    resolver.AddCustom(kCustomOp, RegisterCustomOp());
     resolver.AddFullyConnected(); 
     resolver.AddDepthwiseConv2D(); 
     resolver.AddHardSwish(); 
