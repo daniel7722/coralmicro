@@ -39,7 +39,7 @@ constexpr int kTensorArenaSize = 1024 * 1024 * 2;
 STATIC_TENSOR_ARENA_IN_SDRAM(tensor_arena, kTensorArenaSize);
 constexpr char kModelPath[] =
     "/models/"
-    "mobilenetv3_cats_vs_dogs_edgetpu.tflite";
+    "mobilenetv2_catdog_quant_edgetpu.tflite";
 constexpr int kModelWidth = 324;
 constexpr int kModelHeight = 324;
 constexpr int kModelSize = kModelWidth * kModelHeight * /*depth*/ 3;
@@ -216,13 +216,11 @@ class InferenceTask : private Task<InferenceTask> {
                         frame.data(), kModelSize);
             char cmd = 0;
             CHECK(xQueueSend(queue_, &cmd, portMAX_DELAY) == pdTRUE);
-            printf("Put() ->enqueueed inference request\r\n");
         }
     }
 
     [[noreturn]] void Run() {
         while (true) {
-            printf("InferenceTask::Run() entered\r\n");
             char cmd;
             CHECK(xQueuePeek(queue_, &cmd, portMAX_DELAY) == pdTRUE);
             counter_++;
@@ -234,11 +232,9 @@ class InferenceTask : private Task<InferenceTask> {
             float cat_score = (scores[0] - zero_point) * scale;
             float dog_score = (scores[1] - zero_point) * scale;
 
-            //   int predicted_class = (cat_score > dog_score) ? 0 : 1;
-            //   const char* predicted_label = (predicted_class == 0) ? "cat" : "dog";
-
-            if (counter_ % kLogInterval == 0 || true) {
-                printf("cat_score: %.2f, dog_score: %.2f\r\n", cat_score, dog_score);
+            if (counter_ % kLogInterval == 0) {
+                printf("cat_score: %.2f, dog_score: %.2f\r\n",
+                       cat_score, dog_score);
             }
             CHECK(xQueueReceive(queue_, &cmd, portMAX_DELAY) == pdTRUE);
         }
